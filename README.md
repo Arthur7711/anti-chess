@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Antichess
 
-## Getting Started
+A two-player antichess (losing chess) game built with Next.js.
 
-First, run the development server:
+## Rules implemented
+
+- Capturing is compulsory. If several captures are available, any may be chosen.
+- The king is an ordinary piece: no check, no checkmate, no castling.
+- Pawns may promote to queen, rook, bishop, knight, or king.
+- En passant exists and counts as a compulsory capture.
+- A player wins by losing all their pieces, or by having no legal move (stalemate wins).
+- Draws: fifty-move rule and threefold repetition.
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev    # http://localhost:3000
+npm test       # engine and session tests
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Architecture
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The code is split into layers that only depend downward. The engine has no
+React or DOM dependency, so it can run in tests, web workers, or on the server.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+lib/engine/       Pure rules: types, board helpers, FEN, move generation,
+                  move application, game-over detection, notation.
+lib/players/      Player abstraction. `HumanPlayer` moves come from the UI;
+                  `BotPlayer` implements `chooseMove(request, signal)`.
+lib/game/         Game session (pure history + status) and the `useGame`
+                  React hook that owns selection, promotion prompts, undo,
+                  and drives bot players when it is their turn.
+components/board/ Board rendering: squares, piece glyphs, promotion picker.
+components/game/  Game screen: status, controls, move list, `GameView`.
+app/              Next.js routes. `app/page.tsx` renders `GameView`.
+```
 
-## Learn More
+### Adding a bot
 
-To learn more about Next.js, take a look at the following resources:
+Implement the `BotPlayer` interface from `lib/players` and pass it to
+`GameView` (or `useGame`) as one of the two players:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```ts
+const bot: BotPlayer = {
+  kind: "bot",
+  id: "random",
+  name: "Random bot",
+  color: "b",
+  async chooseMove({ legalMoves }) {
+    return legalMoves[Math.floor(Math.random() * legalMoves.length)];
+  },
+};
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+<GameView players={{ w: createHumanPlayer("w"), b: bot }} />
+```
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The hook calls `chooseMove` whenever it is the bot's turn and applies the
+returned move. The `AbortSignal` is triggered if the game is reset or undone
+while the bot is thinking. Everything a bot needs is in `lib/engine`:
+`legalMoves`, `applyMove`, `evaluateStatus`, `toFen`, and friends.
